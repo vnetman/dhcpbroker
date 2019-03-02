@@ -5,6 +5,12 @@ import subprocess
 import psutil
 import sys
 import struct
+import time
+
+def epoch_to_printable_localtime(epoch_ts):
+    return '{}'.format(time.strftime('%Y %b %d %H:%M:%S',
+                                     time.localtime(int(epoch_ts))))
+#--------------------
 
 def normalize_mac_address(mac):
     try:

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import argparse
 from dhcp_client import DhcpClient
+from dhcp_lease_db import DhcpLeaseDb
 from utils import drop_privileges, verify_interface_name, normalize_mac_address
 import logging
 
@@ -40,7 +42,12 @@ def main():
     elif args.operation == 'release':
         pass
     elif args.operation == 'view':
-        pass
+        if not os.path.isfile(args.db):
+            print('"{}": no such file'.format(args.db), file=sys.stderr)
+            sys.exit(-1)
+        for lease in DhcpLeaseDb(args.db).all_leases():
+            print(lease)
+        sys.exit(0)
     else:
         raise ValueError('invalid operation')
 #--------------------

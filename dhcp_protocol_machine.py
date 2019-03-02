@@ -1,12 +1,14 @@
-import socket
-import threading
-import select
-from queue import Queue
-from scapy.all import *
-from utils import mac_address_human_to_bytes, set_interface_promiscuous_state, make_raw_socket
-import random
 from enum import Enum, unique
+import threading
+import queue
+import utils
 import logging
+import random
+import time
+import select
+import struct
+from scapy.all import Ether, IP, UDP, BOOTP, DHCP
+from dhcp_lease import DhcpLease
 
 # Requests sent from the main thread to the packet engine thread
 @unique
@@ -30,7 +32,7 @@ class DhcpPacketEngine(threading.Thread):
         self.request_q = request_q
         self.ifname = interface_name
         
-        self.sock_ = make_raw_socket(self.ifname)
+        self.sock_ = utils.make_raw_socket(self.ifname)
     #--------------------
 
     def __del__(self):
@@ -62,44 +64,42 @@ class DhcpPacketEngine(threading.Thread):
     def handle_pkt_send_rcv_request(self, req_pkt, mac, xid, response_collect_await):
         response = dict()
 
-        set_interface_promiscuous_state(self.ifname, 'on')
+        utils.set_interface_promiscuous_state(self.ifname, 'on')
 
         send_result = self.sock_.send(req_pkt)
         if send_result <= 0:
             logging.debug('Packet Engine Thread: send packet failed')
-            set_interface_promiscuous_state(self.ifname, 'off')
+            utils.set_interface_promiscuous_state(self.ifname, 'off')
             response['response'] = ResponseCode.SendFailed
             self.response_q.put(response)
             return
         
         collected_replies = []
         then = time.time()
+        target = then + response_collect_await
+
         while True:
             now = time.time()
-            if (now - then) >= response_collect_await:
+            if now >= target:
                 logging.debug('Packet Engine Thread: time up')
                 break
 
-            try:
-                logging.debug('Packet Engine Thread: waiting for readability')
-                (readable, _, errored) = select([self.sock_], [], [self.sock_], 60)
-            except TimeoutException:
-                logging.debug('Packet Engine Thread: time up, no packets')
-                break
+            logging.debug('Packet Engine Thread: waiting for readability')
+            (readable, _, errored) = select.select([self.sock_], [], [self.sock_], target - now)
             
             if errored:
                 logging.debug('Packet Engine Thread: recv socket error')
-                set_interface_promiscuous_state(self.ifname, 'off')
+                utils.set_interface_promiscuous_state(self.ifname, 'off')
                 response['response'] = ResponseCode.RecvError
                 self.response_q.put(response)
                 return
             
-            pkt = self.sock_.recv(1024)
-            
-            if self.pkt_is_interesting(pkt, mac, xid):
-                collected_replies.append(pkt)
+            elif readable:
+                pkt = self.sock_.recv(1024)
+                if self.pkt_is_interesting(pkt, mac, xid):
+                    collected_replies.append(pkt)
 
-        set_interface_promiscuous_state(self.ifname, 'off')
+        utils.set_interface_promiscuous_state(self.ifname, 'off')
         response = dict()
         response['response'] = ResponseCode.Ok
         response['replies'] = collected_replies
@@ -147,8 +147,8 @@ class DhcpProtocolMachine(object):
     '''Format, send, receive and parse DHCP packets by invoking the DhcpPacketEngine'''
     
     def __init__(self, ifname):
-        self.response_q = Queue(maxsize = 1)
-        self.request_q = Queue(maxsize = 1)
+        self.response_q = queue.Queue(maxsize = 1)
+        self.request_q = queue.Queue(maxsize = 1)
 
         self.packet_engine_ = DhcpPacketEngine(ifname, self.request_q,
                                                self.response_q)
@@ -161,7 +161,7 @@ class DhcpProtocolMachine(object):
         request = dict()
         request['opcode'] = RequestCode.SendPktAwaitResponse
         request['xid'] = xid
-        request['mac'] = mac_address_human_to_bytes(mac)
+        request['mac'] = utils.mac_address_human_to_bytes(mac)
         request['packet'] = self.make_dhcp_discover_pkt(mac, hostname, xid)
         request['await_time'] = 4 # seconds
         self.request_q.put(request)
@@ -171,43 +171,74 @@ class DhcpProtocolMachine(object):
 
         chosen_server = None
         chosen_our_ip = None
+        ignored_offers = []
         
-        offers = response['replies']
-        for offer in offers:
+        for offer in response['replies']:
             parse_result = self.parse_dhcp_offer_or_ack(offer, xid)
-            if not chosen_server:
+            if 'message-type' not in parse_result:
+                continue
+            if parse_result['message-type'] != 2: # 2 == offer
+                continue
+            
+            if chosen_server:
+                ignored_offers.append(parse_result['siaddr'])
+            else:
                 if (not preferred_server) or \
                   (preferred_server == parse_result['siaddr']):
                     chosen_server = parse_result['siaddr']
                     chosen_our_ip = parse_result['yiaddr']
-                    break
+                else:
+                    ignored_offers.append(parse_result['siaddr'])
                 
         if not chosen_server:
-            print('Error; no offers')
             self.packet_engine_.stop()
-            return (False, 'no offers received', None)
+            return (False, 'no usable offers received', None)
 
         request = dict()
         request['opcode'] = RequestCode.SendPktAwaitResponse
         request['xid'] = xid
-        request['mac'] = mac
+        request['mac'] = utils.mac_address_human_to_bytes(mac)
         request['packet'] = self.make_dhcp_request_pkt(mac, hostname, xid, chosen_server, chosen_our_ip)
         request['await_time'] = 4 # seconds
         self.request_q.put(request)
 
         response = self.response_q.get()
         assert response['response'] == ResponseCode.Ok
+        if not response['replies']:
+            self.packet_engine_.stop()
+            return (False, 'no leases obtained', None)
+            
+        if len(response['replies']) > 1:
+            self.packet_engine_.stop()
+            return (False, 'too many leases (impossible)?', None)
+
+        parse_result = self.parse_dhcp_offer_or_ack(response['replies'][0], xid)
+        if ('message-type' not in parse_result) or \
+          (parse_result['message-type'] != 5): # 5 = ack
+            self.packet_engine_.stop()
+            return (False, 'no acknowledgement', None)
         
         self.packet_engine_.stop()
-        return (False, 'not implemented', None)
+
+        now = time.time()
+        new_lease = DhcpLease(mac, chosen_our_ip,
+                              parse_result['ether_src_address'], chosen_server,
+                              now,
+                              now + parse_result['renewal_time'],
+                              now + parse_result['rebinding_time'],
+                              now + parse_result['lease_time'],
+                              ignored_offers)
+        return (True, 'success', new_lease)
+    #--------------------
         
     def make_dhcp_discover_pkt(self, our_mac, our_hostname, xid):
         e = Ether(dst='ff:ff:ff:ff:ff:ff', src=our_mac, type=0x0800)
         i = IP(src='0.0.0.0', dst='255.255.255.255')
         u = UDP(dport=67, sport=68)
-        b = BOOTP(op=1, xid=xid, chaddr=mac_address_human_to_bytes(our_mac))
+        b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
         d = DHCP(options=[('message-type', 'discover'),
                           ('hostname', our_hostname),
+                          ('lease_time', 0xffffffff),
                           ('param_req_list', 1, 28, 3, 15, 6),
                           'end'])
         p = e/i/u/b/d
@@ -219,7 +250,7 @@ class DhcpProtocolMachine(object):
         e = Ether(dst='ff:ff:ff:ff:ff:ff', src=our_mac, type=0x0800)
         i = IP(src='0.0.0.0', dst='255.255.255.255')
         u = UDP(dport=67, sport=68)
-        b = BOOTP(op=1, xid=xid, chaddr=mac_address_human_to_bytes(our_mac))
+        b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
         d = DHCP(options=[('message-type', 'request'),
                           ('server_id', server_ip_address),
                           ('requested_addr', requested_ip_address),
@@ -235,6 +266,8 @@ class DhcpProtocolMachine(object):
         parse_result = dict()
         
         e = Ether(pkt)
+
+        parse_result['ether_src_address'] = e.src
 
         # Some conditions ought to be true by the time we get here; assert that they are.
         assert e.type == 0x0800
@@ -265,6 +298,7 @@ class DhcpProtocolMachine(object):
             assert isinstance(option, tuple)
             assert isinstance(option[0], str)
             parse_result[option[0]] = option[1]
+            print('"{}" => "{}"'.format(option[0], option[1]))
 
         return parse_result
     #--------------------
