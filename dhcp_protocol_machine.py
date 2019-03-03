@@ -198,7 +198,7 @@ class DhcpProtocolMachine(object):
         request['opcode'] = RequestCode.SendPktAwaitResponse
         request['xid'] = xid
         request['mac'] = utils.mac_address_human_to_bytes(mac)
-        request['packet'] = self.make_dhcp_request_pkt(mac, hostname, xid, chosen_server, chosen_our_ip)
+        request['packet'] = self.make_dhcp_initial_request_pkt(mac, hostname, xid, chosen_server, chosen_our_ip)
         request['await_time'] = 4 # seconds
         self.request_q.put(request)
 
@@ -232,6 +232,11 @@ class DhcpProtocolMachine(object):
     #--------------------
         
     def make_dhcp_discover_pkt(self, our_mac, our_hostname, xid):
+        ###[ Ethernet ]### (dst = ff:ff:ff:ff:ff:ff)(src = 20:47:47:79:62:bf)
+        ###[ IP ]###       (src   = 0.0.0.0 dst       = 255.255.255.255)
+        ###[ BOOTP ]###    (op    = BOOTREQUEST  xid = 726017164 ciaddr = 0.0.0.0 yiaddr = 0.0.0.0 siaddr = 0.0.0.0 giaddr = 0.0.0.0)
+        ###[ DHCP options ]###  options   = [message-type=discover client_id=b'\x01 GGyb\xbf' hostname=b'DESKTOP-7CINUAH' vendor_class_id=b'MSFT 5.0' param_req_list=[1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252] end pad pad pad pad]
+        
         e = Ether(dst='ff:ff:ff:ff:ff:ff', src=our_mac, type=0x0800)
         i = IP(src='0.0.0.0', dst='255.255.255.255')
         u = UDP(dport=67, sport=68)
@@ -246,12 +251,19 @@ class DhcpProtocolMachine(object):
         return bytes(p)
     #--------------------
 
-    def make_dhcp_request_pkt(self, our_mac, our_hostname, xid, server_ip_address, requested_ip_address):
+    def make_dhcp_initial_request_pkt(self, our_mac, our_hostname, xid, server_ip_address, requested_ip_address):
+        # Initial
+        ###[ Ethernet ]### (dst = ff:ff:ff:ff:ff:ff)(src = 20:47:47:79:62:bf)
+        ###[ IP ]### (src = 0.0.0.0)(dst = 255.255.255.255)
+        ###[ BOOTP ]### (op = BOOTREQUEST)(xid = 726017164)(ciaddr = 0.0.0.0)(yiaddr = 0.0.0.0)(siaddr = 0.0.0.0)(giaddr = 0.0.0.0)(chaddr = ...)
+        ###[ DHCP options ]###  options = [message-type=request client_id=b'\x01 GGyb\xbf' requested_addr=192.168.1.166 server_id=192.168.1.9 hostname=b'DESKTOP-7CINUAH' client_FQDN=b'\x00\x00\x00DESKTOP-7CINUAH' vendor_class_id=b'MSFT 5.0' param_req_list=[1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252] end]
+        
         e = Ether(dst='ff:ff:ff:ff:ff:ff', src=our_mac, type=0x0800)
         i = IP(src='0.0.0.0', dst='255.255.255.255')
         u = UDP(dport=67, sport=68)
         b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
         d = DHCP(options=[('message-type', 'request'),
+                          ('client_id', b'\x01' + mac_address_human_to_bytes(our_mac)),
                           ('server_id', server_ip_address),
                           ('requested_addr', requested_ip_address),
                           ('hostname', our_hostname),
@@ -260,6 +272,23 @@ class DhcpProtocolMachine(object):
         p = e/i/u/b/d
         
         return bytes(p)
+    #--------------------
+
+    def make_dhcp_renew_pkt(self, lease):
+        # Renewal
+        ###[ Ethernet ]### (dst = 00:1c:c0:34:26:9f)(src = 20:47:47:79:62:bf)
+        ###[ IP ]### (src = 192.168.1.166)(dst = 192.168.1.9)
+        ###[ BOOTP ]### (op = BOOTREQUEST, xid = 2645962703)(ciaddr = 192.168.1.166)(yiaddr = 0.0.0.0)(siaddr = 0.0.0.0)(giaddr = 0.0.0.0)(chaddr ...)
+        ###[ DHCP options ]### options = [message-type=request client_id=b'\x01 GGyb\xbf' hostname=b'DESKTOP-7CINUAH' client_FQDN=b'\x00\x00\x00DESKTOP-7CINUAH' vendor_class_id=b'MSFT 5.0' param_req_list=[1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252] end]
+        pass
+    #--------------------
+    
+    def make_dhcp_release_pkt(self, lease):
+        ###[ Ethernet ]### (dst = 00:1c:c0:34:26:9f)(src = 20:47:47:79:62:bf)
+        ###[ IP ]### (src = 192.168.1.166)(dst = 192.168.1.9)
+        ###[ BOOTP ]### (op = BOOTREQUEST, xid = 2951426453)(ciaddr = 192.168.1.166)(yiaddr = 0.0.0.0)(siaddr = 0.0.0.0)(giaddr = 0.0.0.0)(chaddr ...)
+        ###[ DHCP options ]### options = [message-type=release server_id=192.168.1.9 client_id=b'\x01 GGyb\xbf' end pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad]
+        pass
     #--------------------
 
     def parse_dhcp_offer_or_ack(self, pkt, xid):
@@ -302,6 +331,3 @@ class DhcpProtocolMachine(object):
 
         return parse_result
     #--------------------
-            
-        
-                              

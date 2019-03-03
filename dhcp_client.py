@@ -26,5 +26,21 @@ class DhcpClient(object):
         self.lease_db.persist()
         
         return (True, None, lease)
+
+    def renew_expiring_leases(self):
+        successfully_renewed_leases = []
+        renewal_failed_leases = []
+        return (False, successfully_renewed_leases, renewal_failed_leases)
+
+    def renew_lease(self, client_mac):
+        new_lease = None
+        return (False, 'not implemented yet', new_lease) 
+
+    def release_all_leases(self):
+        
+    
+    def release_lease(self, client):
+        pass
+
 #--------------------
 

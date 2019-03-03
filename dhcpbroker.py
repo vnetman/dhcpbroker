@@ -38,9 +38,43 @@ def main():
             sys.exit(-1)
             
     elif args.operation == 'renew':
-        pass
+        if not os.path.isfile(args.db):
+            print('"{}": no such file'.format(args.db), file=sys.stderr)
+            sys.exit(-1)
+            
+        client = DhcpClient(args.interface, args.db)
+        if args.expiring:
+            (status, successfully_renewed_leases, renewal_failed_leases) = client.renew_expiring_leases()
+            print('Successfully renewed {} lease(s):'.format(len(successfully_renewed_leases)))
+            for l in successfully_renewed_leases:
+                print(l)
+            print('Failed to renew {} lease(s):'.format(len(renewal_failed_leases)))
+            for l in renewal_failed_leases:
+                print(l)
+        elif args.client:
+            (status, errstr, new_lease) = client.renew_lease(args.client)
+            if status:
+                print('Renewal successful. New lease:')
+                print(new_lease)
+            else:
+                print('Lease renewal failed: {}'.format(errstr))
+        else:
+            raise ValueError('Neither "expiring" nor "client" was specified')
+                                                     
+        sys.exit(0 if status else -1)
+                
     elif args.operation == 'release':
-        pass
+        if not os.path.isfile(args.db):
+            print('"{}": no such file'.format(args.db), file=sys.stderr)
+            sys.exit(-1)
+
+        client = DhcpClient(args.interface, args.db)
+        if args.all:
+            client.release_all_leases()
+        elif args.client:
+            client.release_lease(client)
+
+        sys.exit(0)
     elif args.operation == 'view':
         if not os.path.isfile(args.db):
             print('"{}": no such file'.format(args.db), file=sys.stderr)
@@ -51,7 +85,6 @@ def main():
     else:
         raise ValueError('invalid operation')
 #--------------------
-
 
 def parse_command_line_arguments():
     # new --mac <mac> --hostname <hostname> --interface <interface>
@@ -115,7 +148,7 @@ def parse_command_line_arguments():
     release_client_group = parser_op_release.add_mutually_exclusive_group()
 
     release_client_group.add_argument('--client', metavar='<client>',
-                                      help='client whole lease to release')
+                                      help='client whose lease to release')
     release_client_group.add_argument('--all', help='release all leases',
                                       action='store_true')
     
