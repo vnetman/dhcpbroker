@@ -44,13 +44,16 @@ def main():
             
         client = DhcpClient(args.interface, args.db)
         if args.expiring:
-            (status, successfully_renewed_leases, renewal_failed_leases) = client.renew_expiring_leases()
+            (successfully_renewed_leases, renewal_failed_leases) = client.renew_expiring_leases()
             print('Successfully renewed {} lease(s):'.format(len(successfully_renewed_leases)))
             for l in successfully_renewed_leases:
                 print(l)
+                
+            status = True
             print('Failed to renew {} lease(s):'.format(len(renewal_failed_leases)))
-            for l in renewal_failed_leases:
-                print(l)
+            for (l, reason) in renewal_failed_leases:
+                status = False
+                print('-------- {} ---------\n{}\n--------------'.format(reason, l))
         elif args.client:
             (status, errstr, new_lease) = client.renew_lease(args.client)
             if status:
@@ -72,14 +75,17 @@ def main():
         if args.all:
             client.release_all_leases()
         elif args.client:
-            client.release_lease(client)
+            logging.debug('Attempting to release lease for {}'.format(args.client))
+            if not client.release_lease(args.client):
+                print('Failed to release (non-existent?) lease', file=sys.stderr)
+                sys.exit(-1)
 
         sys.exit(0)
     elif args.operation == 'view':
         if not os.path.isfile(args.db):
             print('"{}": no such file'.format(args.db), file=sys.stderr)
             sys.exit(-1)
-        for lease in DhcpLeaseDb(args.db).all_leases():
+        for (mac, lease,) in DhcpLeaseDb(args.db).all_leases():
             print(lease)
         sys.exit(0)
     else:

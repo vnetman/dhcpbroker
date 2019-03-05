@@ -24,4 +24,7 @@ class DhcpLeaseDb(object):
 
     def all_leases(self):
         for mac in self.lease_db_:
-            yield self.lease_db_[mac]
+            yield (mac, self.lease_db_[mac])
+
+    def delete_lease_for_mac(self, mac):
+        del self.lease_db_[mac]

@@ -1,12 +1,14 @@
+import time
 import utils
 
 class DhcpLease(object):
     '''A single DHCP lease'''
     
-    def __init__(self, mac, ip, server_mac, server_ip, leased_at, renew_at,
-                 rebind_at, expire_at, ignored_offers):
+    def __init__(self, mac, ip, hostname, server_mac, server_ip, leased_at,
+                 renew_at, rebind_at, expire_at, ignored_offers):
         
         self.mac_ = mac               # The client MAC
+        self.hostname_ = hostname     # The client's hostname
         self.ip_ = ip                 # The IP address that we got
         self.server_mac_ = server_mac # The MAC address of the server
         self.server_ip_ = server_ip   # The IP address of the server
@@ -22,7 +24,8 @@ class DhcpLease(object):
     #---
             
     def __str__(self):
-        strep  = '     Client MAC: {}\n'
+        strep  = '       Hostname: {}\n'
+        strep += '     Client MAC: {}\n'
         strep += '      Client IP: {}\n'
         strep += '         Server: {} ({})\n'
         strep += '      Leased at: {}\n'
@@ -31,7 +34,7 @@ class DhcpLease(object):
         strep += '      Rebind at: {}\n'
         strep += 'Ignored servers: {}\n'
         
-        return strep.format(self.mac_, self.ip_, self.server_ip_, self.server_mac_,
+        return strep.format(self.hostname_, self.mac_, self.ip_, self.server_ip_, self.server_mac_,
                             utils.epoch_to_printable_localtime(self.leased_at_),
                             utils.epoch_to_printable_localtime(self.expire_at_),
                             utils.epoch_to_printable_localtime(self.renew_at_),
@@ -40,5 +43,22 @@ class DhcpLease(object):
     #---
     
     def mac(self):
-        assert self.mac_
         return self.mac_
+
+    def ip(self):
+        return self.ip_
+
+    def server_mac(self):
+        return self.server_mac_
+
+    def server_ip(self):
+        return self.server_ip_
+
+    def renew_at(self):
+        return self.renew_at_
+
+    def rebind_at(self):
+        return self.rebind_at_
+
+    def hostname(self):
+        return self.hostname_
