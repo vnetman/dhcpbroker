@@ -15,18 +15,17 @@ class DhcpClient(object):
     def new_lease(self, mac, hostname, preferred_server):
         existing_lease = self.lease_db.lookup(mac)
         if existing_lease:
-            return (False, 'MAC has existing lease', None)
+            return (None, 'MAC has existing lease')
         
-        (status, errstr, lease) = self.protocol_machine.obtain_new_lease(
+        (lease, errstr) = self.protocol_machine.obtain_new_lease(
             mac, hostname, preferred_server)
-            
-        if not status:
-            return (False, errstr, None)
+        if not lease:
+            return (None, errstr)
 
         self.lease_db.add(lease)
         self.lease_db.persist()
         
-        return (True, None, lease)
+        return (lease, '')
 
     def renew_expiring_leases(self):
         # Only renew leases past the renewal time, but not past the rebinding

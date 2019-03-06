@@ -223,7 +223,7 @@ class DhcpProtocolMachine(object):
                 
         if not chosen_server:
             self.packet_engine_.stop()
-            return (False, 'no usable offers received', None)
+            return (None, 'no usable offers received')
 
         request = dict()
         request['opcode'] = RequestCode.SendPktAwaitResponse
@@ -237,17 +237,17 @@ class DhcpProtocolMachine(object):
         assert response['response'] == ResponseCode.Ok
         if not response['replies']:
             self.packet_engine_.stop()
-            return (False, 'no leases obtained', None)
+            return (None, 'no leases obtained')
             
         if len(response['replies']) > 1:
             self.packet_engine_.stop()
-            return (False, 'too many leases (impossible)?', None)
+            return (None, 'too many leases (impossible)?')
 
         parse_result = self.parse_dhcp_offer_or_ack(response['replies'][0], xid)
         if ('message-type' not in parse_result) or \
           (parse_result['message-type'] != 5): # 5 = ack
             self.packet_engine_.stop()
-            return (False, 'no acknowledgement', None)
+            return (None, 'no acknowledgement')
         
         self.packet_engine_.stop()
 
@@ -259,7 +259,8 @@ class DhcpProtocolMachine(object):
                               now + parse_result['rebinding_time'],
                               now + parse_result['lease_time'],
                               ignored_offers)
-        return (True, 'success', new_lease)
+        
+        return (new_lease, '')
     #--------------------
 
     def renew_lease(self, lease):

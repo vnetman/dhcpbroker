@@ -5,30 +5,53 @@ import os
 import argparse
 from dhcp_client import DhcpClient
 from dhcp_lease_db import DhcpLeaseDb
-from utils import drop_privileges, verify_interface_name, normalize_mac_address
+import utils
 import logging
 
 def main():
-    logging.basicConfig(level=logging.DEBUG, format=' %(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG,
+                        format=' %(asctime)s - %(levelname)s - %(message)s')
 
-    drop_privileges()
+    utils.drop_privileges()
 
     args = parse_command_line_arguments()
 
+    # If there is a mac address argument on the command line, "normalize" it to
+    # our standard form (XX:XX:XX:XX:XX:XX)
+    try:
+        client_mac = utils.normalize_mac_address(args.client_mac)
+        if not client_mac:
+            sys.exit(-1)
+    except AttributeError:
+        pass
+
+    # If there is an interface name on the command line, see if it is legit.
+    try:
+        if not utils.verify_interface_name(args.interface):
+            sys.exit(-1)
+    except AttributeError:
+        pass
+
+    # Verify the "db" argument on the command line. All operation modes use
+    # the db argument
+    if os.path.exists(args.db):
+        if not os.path.isfile(args.db):
+            print('"{}" is not a file'.format(args.db),
+                  file=sys.stderr)
+            sys.exit(-1)
+    else:
+        # For all operations other than 'new', the lease db file has to exist
+        if args.operation != 'new':
+            print('db file "{}" does not exist'.format(args.db),
+                  file=sys.stderr)
+            sys.exit(-1)
+    
     if args.operation == 'new':
         
-        mac_address = normalize_mac_address(args.mac)
-        if not mac_address:
-            sys.exit(-1)
-            
-        if not verify_interface_name(args.interface):
-            sys.exit(-1)
-            
         client = DhcpClient(args.interface, args.db)
-        (status, errstr, new_lease) = client.new_lease(mac_address,
-                                                       args.hostname,
-                                                       args.preferred_server)
-        if status:
+        (new_lease, errstr) = client.new_lease(client_mac, args.hostname,
+                                               args.preferred_server)
+        if new_lease:
             print('New lease:\n{}'.format(new_lease))
             sys.exit(0)
         else:
@@ -38,9 +61,6 @@ def main():
             sys.exit(-1)
             
     elif args.operation == 'renew':
-        if not os.path.isfile(args.db):
-            print('"{}": no such file'.format(args.db), file=sys.stderr)
-            sys.exit(-1)
             
         client = DhcpClient(args.interface, args.db)
         if args.expiring:
@@ -118,7 +138,7 @@ def parse_command_line_arguments():
     parser_op_view = subparsers.add_parser('view', help='View current leases')
 
     # Options for 'new'
-    parser_op_new.add_argument('--mac', metavar='<mac>',
+    parser_op_new.add_argument('--mac', metavar='<mac>', dest='client_mac',
                                help='MAC address to obtain DHCP lease for',
                                required=True)
     parser_op_new.add_argument('--interface', metavar='<interface-name>',
@@ -139,7 +159,7 @@ def parse_command_line_arguments():
     # Options for 'renew'
     renew_client_group = parser_op_renew.add_mutually_exclusive_group()
 
-    renew_client_group.add_argument('--client', metavar='<client>',
+    renew_client_group.add_argument('--client', metavar='<client>', dest='client_mac',
                                     help='specific client to renew lease for')
     renew_client_group.add_argument('--expiring',
                                     help='renew all expiring leases',
@@ -153,7 +173,7 @@ def parse_command_line_arguments():
     # Options for 'release'
     release_client_group = parser_op_release.add_mutually_exclusive_group()
 
-    release_client_group.add_argument('--client', metavar='<client>',
+    release_client_group.add_argument('--client', metavar='<client>', dest='client_mac',
                                       help='client whose lease to release')
     release_client_group.add_argument('--all', help='release all leases',
                                       action='store_true')
