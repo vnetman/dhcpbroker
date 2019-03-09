@@ -6,10 +6,14 @@ import psutil
 import sys
 import struct
 import time
+import logging
 
 def epoch_to_printable_localtime(epoch_ts):
-    return '{}'.format(time.strftime('%Y %b %d %H:%M:%S',
-                                     time.localtime(int(epoch_ts))))
+    if epoch_ts:
+        return '{}'.format(time.strftime('%Y %b %d %H:%M:%S',
+                                        time.localtime(int(epoch_ts))))
+    else:
+        return '(not specified)'
 #--------------------
 
 def normalize_mac_address(mac):
@@ -55,7 +59,7 @@ def set_interface_promiscuous_state(ifname, state):
               flush=True)
         return (False, cp.stdout, cp.stderr)
     else:
-        print('Set interface {} promiscuous {}'.format(ifname, state), flush=True)
+        logging.info('Set interface {} promiscuous {}'.format(ifname, state))
         return (True, None, None)
 #--------------------
 
@@ -66,7 +70,11 @@ def make_raw_socket(interface_name):
         sock = socket(AF_PACKET, SOCK_RAW)
         sock.bind((interface_name, 0x0800))
     except PermissionError:
+        print('-----------------------------------------------------------------',
+              file=sys.stderr)
         print('Failed to create raw socket. You must run this program with sudo.',
+              file=sys.stderr)
+        print('-----------------------------------------------------------------',
               file=sys.stderr)
         sys.exit(-1)
     except Exception as e:

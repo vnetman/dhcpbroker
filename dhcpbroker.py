@@ -23,7 +23,7 @@ def main():
         if not client_mac:
             sys.exit(-1)
     except AttributeError:
-        pass
+        client_mac = None
 
     # If there is an interface name on the command line, see if it is legit.
     try:
@@ -60,64 +60,64 @@ def main():
                                                                   errstr))
             sys.exit(-1)
             
-    elif args.operation == 'renew':
+    elif args.operation == 'rebind':
             
         client = DhcpClient(args.interface, args.db)
         if args.expiring:
-            (successfully_renewed_leases, renewal_failed_leases) = client.renew_expiring_leases()
-            print('Successfully renewed {} lease(s):'.format(len(successfully_renewed_leases)))
-            for l in successfully_renewed_leases:
-                print(l)
-                
             status = True
-            print('Failed to renew {} lease(s):'.format(len(renewal_failed_leases)))
-            for (l, reason) in renewal_failed_leases:
+
+            (rebound_leases, failed_rebind_leases) = client.rebind_expiring_leases()
+            if rebound_leases:
+                print('Successfully rebound {} leases:'.format(len(rebound_leases)))
+                for l in rebound_leases:
+                    print('----------------------------------------')
+                    print(l)
+
+            if failed_rebind_leases:
                 status = False
-                print('-------- {} ---------\n{}\n--------------'.format(reason, l))
-        elif args.client:
-            (status, errstr, new_lease) = client.renew_lease(args.client)
+                print('Failed to rebind {} leases:'.format(len(failed_rebind_leases)))
+                for (l, reason) in failed_rebind_leases:
+                    print('-------- {} ---------\n{}\n--------------'.format(reason, l))
+        else:
+            assert client_mac is not None
+            (status, errstr, new_lease) = client.rebind_lease(client_mac)
             if status:
-                print('Renewal successful. New lease:')
+                print('Rebind successful. New lease:')
                 print(new_lease)
             else:
-                print('Lease renewal failed: {}'.format(errstr))
-        else:
-            raise ValueError('Neither "expiring" nor "client" was specified')
+                print('Lease rebind failed: {}'.format(errstr))
                                                      
         sys.exit(0 if status else -1)
                 
     elif args.operation == 'release':
-        if not os.path.isfile(args.db):
-            print('"{}": no such file'.format(args.db), file=sys.stderr)
-            sys.exit(-1)
 
         client = DhcpClient(args.interface, args.db)
         if args.all:
             client.release_all_leases()
-        elif args.client:
-            logging.debug('Attempting to release lease for {}'.format(args.client))
-            if not client.release_lease(args.client):
+        elif client_mac:
+            logging.debug('Attempting to release lease for {}'.format(client_mac))
+            if not client.release_lease(client_mac):
                 print('Failed to release (non-existent?) lease', file=sys.stderr)
                 sys.exit(-1)
 
         sys.exit(0)
+
     elif args.operation == 'view':
-        if not os.path.isfile(args.db):
-            print('"{}": no such file'.format(args.db), file=sys.stderr)
-            sys.exit(-1)
         for (mac, lease,) in DhcpLeaseDb(args.db).all_leases():
             print(lease)
+            print('----------------------------------------')
         sys.exit(0)
+        
     else:
         raise ValueError('invalid operation')
-#--------------------
+#---
 
 def parse_command_line_arguments():
     # new --mac <mac> --hostname <hostname> --interface <interface>
     #                 [--preferred-server <preferred server>] --db <lease db>
-    # renew (--client <client> | --expiring) --interface <interface>
+    # rebind (--mac <mac> | --expiring) --interface <interface>
     #                 --db <lease db>
-    # release (--client <client> | --all) --interface <interface>
+    # release (--mac <mac> | --all) --interface <interface>
     #                 --db <lease db>
     # view --db <lease db>
 
@@ -129,8 +129,8 @@ def parse_command_line_arguments():
     parser_op_new = subparsers.add_parser('new',
                                           help='Obtain new lease')
     
-    parser_op_renew = subparsers.add_parser('renew',
-                                            help='Renew one or more leases')
+    parser_op_rebind = subparsers.add_parser('rebind',
+                                             help='Rebind one or more leases')
     
     parser_op_release = subparsers.add_parser('release',
                                               help='Release one or more leases')
@@ -156,24 +156,24 @@ def parse_command_line_arguments():
                                metavar='<ip address of DHCP server to use>',
                                required=False)
 
-    # Options for 'renew'
-    renew_client_group = parser_op_renew.add_mutually_exclusive_group()
+    # Options for 'rebind'
+    rebind_client_group = parser_op_rebind.add_mutually_exclusive_group(required=True)
 
-    renew_client_group.add_argument('--client', metavar='<client>', dest='client_mac',
-                                    help='specific client to renew lease for')
-    renew_client_group.add_argument('--expiring',
-                                    help='renew all expiring leases',
-                                    action='store_true')
+    rebind_client_group.add_argument('--mac', metavar='<client>', dest='client_mac',
+                                     help='specific client to rebind lease for')
+    rebind_client_group.add_argument('--expiring',
+                                     help='rebind all expiring leases',
+                                     action='store_true')
     
-    parser_op_renew.add_argument('--interface', metavar='<interface-name>',
-                                 help='Interface to work over', required=True)
-    parser_op_renew.add_argument('--db', metavar='<lease_db_file>',
-                                 help='Db file to use', required=True)
+    parser_op_rebind.add_argument('--interface', metavar='<interface-name>',
+                                  help='Interface to work over', required=True)
+    parser_op_rebind.add_argument('--db', metavar='<lease_db_file>',
+                                  help='Db file to use', required=True)
 
     # Options for 'release'
-    release_client_group = parser_op_release.add_mutually_exclusive_group()
+    release_client_group = parser_op_release.add_mutually_exclusive_group(required=True)
 
-    release_client_group.add_argument('--client', metavar='<client>', dest='client_mac',
+    release_client_group.add_argument('--mac', metavar='<client>', dest='client_mac',
                                       help='client whose lease to release')
     release_client_group.add_argument('--all', help='release all leases',
                                       action='store_true')
@@ -190,7 +190,7 @@ def parse_command_line_arguments():
     args = parser.parse_args()
 
     return args
-#--------------------
+#---
 
 if __name__ == '__main__':
     main()

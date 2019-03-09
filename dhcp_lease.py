@@ -30,35 +30,65 @@ class DhcpLease(object):
         strep += '         Server: {} ({})\n'
         strep += '      Leased at: {}\n'
         strep += '      Expire at: {}\n'
-        strep += '       Renew at: {}\n'
-        strep += '      Rebind at: {}\n'
+        strep += '       Renew at: {} {}\n'
+        strep += '      Rebind at: {} {}\n'
         strep += 'Ignored servers: {}\n'
         
         return strep.format(self.hostname_, self.mac_, self.ip_, self.server_ip_, self.server_mac_,
                             utils.epoch_to_printable_localtime(self.leased_at_),
                             utils.epoch_to_printable_localtime(self.expire_at_),
-                            utils.epoch_to_printable_localtime(self.renew_at_),
-                            utils.epoch_to_printable_localtime(self.rebind_at_),
+                            utils.epoch_to_printable_localtime(self.renew_at()),
+                            '(calculated)' if not self.renew_at_ else '',
+                            utils.epoch_to_printable_localtime(self.rebind_at()),
+                            '(calculated)' if not self.rebind_at_ else '',
                             self.ignored_offers_)
     #---
     
     def mac(self):
         return self.mac_
+    #---
 
     def ip(self):
         return self.ip_
+    #---
 
     def server_mac(self):
         return self.server_mac_
+    #---
 
     def server_ip(self):
         return self.server_ip_
+    #---
 
     def renew_at(self):
-        return self.renew_at_
+        # If the server provided a value, use it. Otherwise calculate it.
+        if self.renew_at_:
+            return self.renew_at_
+        else:
+            x = self.leased_at_
+            y = self.expire_at_
+            return x + (((y - x) * 50) // 100)
+    #---
 
     def rebind_at(self):
-        return self.rebind_at_
+        # If the server provided a value, use it. Otherwise calculate it.
+        if self.rebind_at_:
+            return self.rebind_at_
+        else:
+            x = self.leased_at_
+            y = self.expire_at_
+            return x + (((y - x) * 87) // 100)
+    #---
+
+    def expire_at(self):
+        return self.expire_at_
+    #---
+
+    def leased_at(self):
+        return self.leased_at_
+    #---
 
     def hostname(self):
         return self.hostname_
+    #---
+#===    
