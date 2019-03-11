@@ -20,11 +20,12 @@ class DhcpClient(object):
         if existing_lease:
             return (None, 'MAC has existing lease')
 
-        logging.info('Client: new lease request for {} ("{}") '
-                     '(server = {})'.format(mac, hostname,
-                                            preferred_server if preferred_server else 'no preference'))
+        logging.info('Client: lease request for {} ("{}") '
+                     '(server = {})'.format(
+                         mac, hostname,
+                         preferred_server if preferred_server else 'any'))
         
-        (lease, errstr) = self.protocol_machine.obtain_new_lease(
+        lease, errstr = self.protocol_machine.obtain_new_lease(
             mac, hostname, preferred_server)
         if not lease:
             return (None, errstr)
@@ -57,20 +58,23 @@ class DhcpClient(object):
         for (mac, lease) in self.lease_db.all_leases():
             if now < lease.rebind_at():
                 # too early
-                logging.info('Client: not rebinding {}; too early (rebind time not reached)'.format(mac))
+                logging.info('Client: not rebinding {}; too early (rebind '
+                             'time not reached)'.format(mac))
                 continue
 
             if now >= lease.expire_at():
                 # too late
-                logging.info('Client: not rebinding {}; lease expired'.format(mac))
+                logging.info('Client: not rebinding {}; '
+                             'lease expired'.format(mac))
                 rebind_failed_leases.append((lease, 'lease expired'))
                 continue
 
             logging.info('Client: Asking for rebinding {}'.format(mac))
             
-            (new_lease, errstr) = self.protocol_machine.rebind_lease(lease)
+            new_lease, errstr = self.protocol_machine.rebind_lease(lease)
             if not new_lease:
-                logging.info('Client: rebind of {} failed ("{}")'.format(mac, errstr))
+                logging.info('Client: rebind of {} failed '
+                             '("{}")'.format(mac, errstr))
                 rebind_failed_leases.append((lease, errstr))
             else:
                 logging.info('Client: rebind of {} succeeded'.format(mac))
@@ -79,7 +83,8 @@ class DhcpClient(object):
         # For the successfully rebound leases, remove the old lease from the
         # the db and add the renewed one
         for sl in successfully_rebound_leases:
-            logging.info('Client: Deleting & re-adding lease for {} in db'.format(sl.mac))
+            logging.info('Client: Deleting & re-adding lease for '
+                         '{} in db'.format(sl.mac))
             self.lease_db.delete_lease_for_mac(sl.mac())
             self.lease_db.add(sl)
             
@@ -95,24 +100,25 @@ class DhcpClient(object):
         
         logging.info('Client: Asking for rebinding {}'.format(client_mac))
         
-        (new_lease, errstr) = self.protocol_machine.rebind_lease(old_lease)
+        new_lease, errstr = self.protocol_machine.rebind_lease(old_lease)
         if not new_lease:
-            return (False,
-                    'Failed to rebind lease for {}: {}'.format(client_mac, errstr),
-                    None)
-        
-        logging.info('Client: Deleting & re-adding lease for {} in db'.format(client_mac))
+            return None, 'Failed to rebind lease for {}: {}'.format(client_mac,
+                                                                    errstr)
+        logging.info('Client: Deleting & re-adding lease for {} '
+                     'in db'.format(client_mac))
         
         self.lease_db.delete_lease_for_mac(client_mac)
         self.lease_db.add(new_lease)
-        return (True, '', new_lease)
+        
+        return new_lease, ''
     #---
 
     def release_all_leases(self):
         macs = []
         
         for (mac, lease) in self.lease_db.all_leases():
-            logging.info('Client: Asking for releasing lease for {}'.format(mac))
+            logging.info('Client: Asking for releasing lease '
+                         'for {}'.format(mac))
             self.protocol_machine.release_lease(lease)
             macs.append(mac)
             
@@ -124,13 +130,16 @@ class DhcpClient(object):
     def release_lease(self, client_mac):
         lease = self.lease_db.lookup(client_mac)
         if not lease:
-            logging.info('Client: Cannot release lease for {}: not present in lease db'.format(client_mac))
+            logging.info('Client: Cannot release lease for {}: not present in '
+                         'lease db'.format(client_mac))
             return False
         
-        logging.info('Client: Asking for releasing lease for {}'.format(lease.mac()))
+        logging.info('Client: Asking for releasing lease '
+                     'for {}'.format(lease.mac()))
         self.protocol_machine.release_lease(lease)
         
-        logging.info('Client: Deleting lease for {} from db'.format(client_mac))
+        logging.info('Client: Deleting lease for {} '
+                     'from db'.format(client_mac))
         self.lease_db.delete_lease_for_mac(client_mac)
         
         return True

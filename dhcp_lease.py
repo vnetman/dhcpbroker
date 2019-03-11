@@ -5,7 +5,7 @@ class DhcpLease(object):
     '''A single DHCP lease'''
     
     def __init__(self, mac, ip, hostname, server_mac, server_ip, leased_at,
-                 renew_at, rebind_at, expire_at, ignored_offers):
+                 renew_at, rebind_at, expire_at):
         
         self.mac_ = mac               # The client MAC
         self.hostname_ = hostname     # The client's hostname
@@ -17,8 +17,6 @@ class DhcpLease(object):
         self.rebind_at_ = rebind_at
         self.expire_at_ = expire_at
         self.ignored_offers_ = []  # IP addresses of servers whose offers we did not accept
-        for io in ignored_offers:
-            self.ignored_offers_.append(io)
         
         # Not tracking other DHCP parameters (dns, gateway etc.)
     #---
@@ -43,7 +41,11 @@ class DhcpLease(object):
                             '(calculated)' if not self.rebind_at_ else '',
                             self.ignored_offers_)
     #---
-    
+
+    def add_to_ignored_offers(self, ignored_offer):
+        self.ignored_offers.append(ignored_offer)
+    #---
+        
     def mac(self):
         return self.mac_
     #---

@@ -59,13 +59,20 @@ class DhcpPacketEngine(threading.Thread):
         # In order to discard uninteresting packets quickly, we look
         # at fields in a different order than we logically would.
 
-        if pkt[23] == 0x11: # ip protocol == UDP
-            if pkt[34:38] == b'\x00\x43\x00\x44': # check udp src & dest ports
-                if xid == struct.unpack('!L', pkt[46:50])[0]: # check xid
-                    if pkt[0:6] == mac:
-                        logging.debug('Packet Engine Thread: found interesting DHCP packet')
-                        return True
-        return False
+        if pkt[23] != 0x11: # ip protocol == UDP
+            return False
+        
+        if pkt[34:38] != b'\x00\x43\x00\x44': # check udp src & dest ports
+            return False
+        
+        if xid != struct.unpack('!L', pkt[46:50])[0]: # check xid
+            return False
+        
+        if (pkt[0:6] != mac) and (pkt[0:6] != b'\xff\xff\xff\xff\xff\xff'):
+            return False
+        
+        logging.debug('Packet Engine Thread: found interesting DHCP packet')
+        return True
     #---
 
     def handle_pkt_send_request(self, req_pkt):
@@ -259,12 +266,15 @@ class DhcpProtocolMachine(object):
         if not chosen_server:
             return (None, 'no usable offers received')
 
-        (lease, errstr) = self.request_lease(xid, mac, hostname, chosen_server, chosen_our_ip, ignored_offers)
+        lease, errstr = self.request_lease(xid, mac, hostname, chosen_server, chosen_our_ip, True)
+
+        for i in ignored_offers:
+            lease.add_to_ignored_offers(i)
         
         return (lease, errstr)
     #---
 
-    def request_lease(self, xid, mac, hostname, server_ip, our_ip, ignored_offers):
+    def request_lease(self, xid, mac, hostname, server_ip, our_ip, selecting):
         '''Manufacture and send a DHCPREQUEST message, wait for and process the
         DHCPACK.
         This method is invoked for both the fresh lease as well as the rebind
@@ -274,7 +284,7 @@ class DhcpProtocolMachine(object):
         request['opcode'] = RequestCode.SendPktAwaitResponse
         request['xid'] = xid
         request['mac'] = utils.mac_address_human_to_bytes(mac)
-        request['packet'] = self.make_dhcp_request_pkt(mac, hostname, xid, server_ip, our_ip)
+        request['packet'] = self.make_dhcp_request_pkt(mac, hostname, xid, server_ip, our_ip, selecting)
         request['await_time'] = 4 # seconds
 
         logging.info('Protocol machine: Placing request to send DHCPREQUEST...')
@@ -289,15 +299,15 @@ class DhcpProtocolMachine(object):
         
         assert response['response'] == ResponseCode.Ok
         if not response['replies']:
-            return (None, 'no leases obtained')
+            return None, 'no leases obtained'
 
         if len(response['replies']) > 1:
-            return (None, 'too many leases (impossible)?')
+            return None, 'too many leases (impossible)?'
 
         parse_result = self.parse_dhcp_offer_or_ack(response['replies'][0], xid)
         if ('message-type' not in parse_result) or \
           (parse_result['message-type'] != 5): # 5 = ack
-            return (None, 'no acknowledgement')
+            return None, 'no acknowledgement'
 
         logging.info('Protocol machine: DHCPACK received, preparing lease')
         
@@ -307,10 +317,9 @@ class DhcpProtocolMachine(object):
         new_lease = DhcpLease(mac, parse_result['yiaddr'], hostname,
                               parse_result['ether_src_address'], server_ip,
                               now, renew_ts, rebind_ts,
-                              now + parse_result['lease_time'],
-                              ignored_offers)
+                              now + parse_result['lease_time'])
 
-        return (new_lease, '')
+        return new_lease, ''
     #---
 
     def rebind_lease(self, lease):
@@ -325,7 +334,7 @@ class DhcpProtocolMachine(object):
         
         return self.request_lease(xid, lease.mac(),
                                   lease.hostname(), lease.server_ip(),
-                                  lease.ip(), [])
+                                  lease.ip(), False)
     #---
 
     def make_dhcp_discover_pkt(self, our_mac, our_hostname, xid):
@@ -355,7 +364,7 @@ class DhcpProtocolMachine(object):
         return bytes(p)
     #---
 
-    def make_dhcp_request_pkt(self, our_mac, our_hostname, xid, server_ip_address, requested_ip_address):
+    def make_dhcp_request_pkt(self, our_mac, our_hostname, xid, server_ip_address, requested_ip_address, selecting):
         '''Use Scapy to build a DHCPREQUEST packet. We only employ broadcast
         requests in this program.'''
 
@@ -363,17 +372,29 @@ class DhcpProtocolMachine(object):
         i = IP(src='0.0.0.0', dst='255.255.255.255')
         u = UDP(dport=67, sport=68)
 
-        # op = BOOTREQUEST, ciaddr = yiaddr = siaddr = giaddr = 0.0.0.0
-        # chaddr = our (client) mac address
-        b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
+        if selecting:
+            # op = BOOTREQUEST, ciaddr = yiaddr = siaddr = giaddr = 0.0.0.0
+            # chaddr = our (client) mac address
+            b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
 
-        d = DHCP(options=[('message-type', 'request'),
-                          ('client_id', b'\x01' + utils.mac_address_human_to_bytes(our_mac)),
-                          ('server_id', server_ip_address),
-                          ('requested_addr', requested_ip_address),
-                          ('hostname', our_hostname),
-                          ('param_req_list', 1, 28, 3, 15, 6),
-                          'end'])
+            d = DHCP(options=[('message-type', 'request'),
+                              ('client_id', b'\x01' + utils.mac_address_human_to_bytes(our_mac)),
+                              ('server_id', server_ip_address),
+                              ('requested_addr', requested_ip_address),
+                              ('hostname', our_hostname),
+                              ('param_req_list', 1, 28, 3, 15, 6),
+                              'end'])
+        else:
+            b = BOOTP(op=1, xid=xid, chaddr=utils.mac_address_human_to_bytes(our_mac))
+
+            d = DHCP(options=[('message-type', 'request'),
+                              ('client_id', b'\x01' + utils.mac_address_human_to_bytes(our_mac)),
+                              ('server_id', server_ip_address),
+                              ('requested_addr', requested_ip_address),
+                              ('hostname', our_hostname),
+                              ('param_req_list', 1, 28, 3, 15, 6),
+                              'end'])
+
         p = e/i/u/b/d
 
         return bytes(p)

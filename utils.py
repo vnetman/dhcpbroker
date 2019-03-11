@@ -69,6 +69,7 @@ def make_raw_socket(interface_name):
     try:
         sock = socket(AF_PACKET, SOCK_RAW)
         sock.bind((interface_name, 0x0800))
+        
     except PermissionError:
         print('-----------------------------------------------------------------',
               file=sys.stderr)
@@ -77,6 +78,7 @@ def make_raw_socket(interface_name):
         print('-----------------------------------------------------------------',
               file=sys.stderr)
         sys.exit(-1)
+        
     except Exception as e:
         drop_privileges()
         raise e
